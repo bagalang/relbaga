@@ -1,5 +1,22 @@
 # relbaga
 
+
+This repository is the package. The compiler and `std` stay in the baga
+language monorepo. Check this tree out as `app-product/relbaga` there
+(git submodule) so path deps and `-I app-product` keep working.
+
+## Checkout
+
+Inside a baga language clone:
+
+```bash
+git submodule update --init --recursive
+# or, first time from a fresh baga tree without the submodule recorded:
+git clone git@github.com:bagalang/relbaga.git app-product/relbaga
+```
+
+`sandak.toml` keeps path deps so shared packages stay in baga.
+`tests/rel_test.baga` stays in baga.
 **Resilience primitives** for Baga services (Track **C6**).
 
 | Tool | API |
