@@ -16,6 +16,10 @@ fn rel_backoff_ms(attempt: i64, base_ms: i64, max_ms: i64, mult: i64) -> i64 {
     if b < 1 {
         b = 1
     }
+    let mut cap = max_ms
+    if cap < 1 {
+        cap = 1
+    }
     let mut m = mult
     if m < 1 {
         m = 1
@@ -23,20 +27,18 @@ fn rel_backoff_ms(attempt: i64, base_ms: i64, max_ms: i64, mult: i64) -> i64 {
     let mut d = b
     let mut i: i64 = 0
     while i < a {
-        // saturate toward max
-        if d >= max_ms {
-            return max_ms
+        if d >= cap {
+            return cap
         }
         let next = d * m
         if next < d {
-            // overflow
-            return max_ms
+            return cap
         }
         d = next
         i = i + 1
     }
-    if d > max_ms {
-        return max_ms
+    if d > cap {
+        return cap
     }
     return d
 }
@@ -50,6 +52,9 @@ spec rel_should_retry {
         - output == 0 || output == 1
 }
 fn rel_should_retry(attempt: i64, max_attempts: i64) -> i64 {
+    if max_attempts < 1 {
+        return 0
+    }
     if attempt + 1 < max_attempts {
         return 1
     }
@@ -166,19 +171,28 @@ fn brk_new(threshold: i64, open_ms: i64) -> Breaker {
     }
 }
 
-// 1 = call allowed, 0 = short-circuit (open).
+fn brk_state_name(state: i64) -> str {
+    if state == 0 {
+        return "closed"
+    }
+    if state == 1 {
+        return "open"
+    }
+    if state == 2 {
+        return "half-open"
+    }
+    return "unknown"
+}
+
+// 1 = call allowed, 0 = short-circuit.
+// OPEN stays denied until `brk_tick` (or `brk_start`) moves it to half-open.
 fn brk_allow(b: Breaker, now_ms: i64) -> i64 {
     if b.state == BRK_CLOSED() {
         return 1
     }
     if b.state == BRK_OPEN() {
-        if now_ms >= b.open_until {
-            // transition to half-open is done by brk_enter_half
-            return 0
-        }
         return 0
     }
-    // half-open: only one probe
     if b.half_inflight == 0 {
         return 1
     }
@@ -201,6 +215,24 @@ fn brk_on_start(b: Breaker, now_ms: i64) -> Breaker {
         b.half_inflight = 1
     }
     return b
+}
+
+struct BrkStart {
+    brk: Breaker,
+    ok: i64
+}
+
+// Tick + allow + reserve the half-open probe in one step.
+// Call this instead of tick/allow/on_start (on_start-then-allow denies the probe).
+fn brk_start(b: Breaker, now_ms: i64) -> BrkStart {
+    let mut x = brk_tick(b, now_ms)
+    if brk_allow(x, now_ms) == 0 {
+        return BrkStart { brk: x, ok: 0 }
+    }
+    if x.state == BRK_HALF() {
+        x.half_inflight = 1
+    }
+    return BrkStart { brk: x, ok: 1 }
 }
 
 fn brk_success(b: Breaker, now_ms: i64) -> Breaker {
